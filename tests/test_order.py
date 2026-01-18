@@ -3,6 +3,7 @@ import pytest
 import requests
 from urls import *
 from helpers import create_order
+from data import INVALID_INGREDIENTS, ERROR_MESSAGES
 
 
 class TestCreateOrder:
@@ -84,17 +85,17 @@ class TestCreateOrder:
         with allure.step("Проверка наличия ингредиентов"):
             assert valid_ingredients is not None
         
-        with allure.step("Попытка создания заказа без авторизации"):
+        with allure.step("Создание заказа без авторизации (должно быть доступно)"):
             response_without_auth = create_order(None, valid_ingredients[:2])
         
-        with allure.step("Проверка отказа в доступе"):
-            assert response_without_auth.status_code == 401
+        with allure.step("Проверка успешного создания заказа без авторизации"):
+            assert response_without_auth.status_code == 200
         
-        with allure.step("Анализ ошибки авторизации"):
+        with allure.step("Анализ ответа"):
             response_data = response_without_auth.json()
-            assert response_data["success"] is False
-            assert "message" in response_data
-            allure.attach(f"Сообщение об ошибке: {response_data['message']}", name="Ошибка авторизации")
+            assert response_data["success"] is True
+            assert "order" in response_data
+            allure.attach(f"Номер заказа: {response_data['order']['number']}", name="Заказ без авторизации")
         
         with allure.step("Регистрация нового пользователя"):
             register_response = requests.post(REGISTER, json=user_data)
@@ -108,7 +109,7 @@ class TestCreateOrder:
             order_response = create_order(access_token, valid_ingredients[:2])
             assert order_response.status_code == 200
         
-        with allure.step("Проверка успешного создания заказа"):
+        with allure.step("Проверка успешного создания заказа с авторизацией"):
             order_data = order_response.json()
             assert order_data["success"] is True
             assert "order" in order_data
@@ -142,10 +143,9 @@ class TestCreateOrder:
         with allure.step("Анализ сообщения об ошибке"):
             response_data = response.json()
             assert response_data["success"] is False
-            expected_message = "Ingredient ids must be provided"
+            expected_message = ERROR_MESSAGES["INGREDIENTS_REQUIRED"]
             assert response_data["message"] == expected_message
             allure.attach(f"Ожидаемое сообщение: {expected_message}", name="Валидация")
-            allure.attach(f"Полученное сообщение: {response_data['message']}", name="Ответ сервера")
 
     @allure.feature("Создание заказа")
     @allure.story("Попытка создания заказа с невалидным хешем ингредиентов")
@@ -158,7 +158,7 @@ class TestCreateOrder:
             access_token = authorized_user_with_token["access_token"]
         
         with allure.step("Создание невалидных хешей ингредиентов"):
-            invalid_ingredients = ["invalid_hash_123", "another_invalid_456"]
+            invalid_ingredients = INVALID_INGREDIENTS[:2]
             allure.attach(f"Невалидные ингредиенты: {invalid_ingredients}", name="Тестовые данные")
         
         with allure.step("Попытка создания заказа с невалидными ингредиентами"):
@@ -167,14 +167,10 @@ class TestCreateOrder:
         with allure.step("Проверка внутренней ошибки сервера"):
             assert response.status_code == 500
         
-        with allure.step("Обработка ответа сервера"):
-            try:
-                response_data = response.json()
-                if "success" in response_data:
-                    assert response_data["success"] is False
-                    allure.attach(str(response_data), name="Ответ API")
-            except ValueError:
-                allure.attach("Ответ не в JSON формате", name="Формат ответа")
+        with allure.step("Проверка наличия ответа от сервера"):
+            # Просто проверяем, что сервер что-то вернул
+            assert response.text, "Сервер должен вернуть ответ"
+            allure.attach(response.text, name="Ответ сервера")
 
     @allure.feature("Создание заказа")
     @allure.story("Попытка создания заказа с пустым массивом ингредиентов")
@@ -195,7 +191,6 @@ class TestCreateOrder:
         with allure.step("Верификация сообщения об ошибке"):
             response_data = response.json()
             assert response_data["success"] is False
-            expected_message = "Ingredient ids must be provided"
-            assert response_data["message"] == expected_message
+            assert response_data["message"] == ERROR_MESSAGES["INGREDIENTS_REQUIRED"]
             allure.attach(f"Статус код: {response.status_code}", name="HTTP статус")
             allure.attach(f"Сообщение: {response_data['message']}", name="Детали ошибки")

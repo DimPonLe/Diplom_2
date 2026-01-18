@@ -2,79 +2,57 @@ import pytest
 import allure
 import requests
 from urls import *
-from helpers import login_user
+from helpers import *
 
 
-class TestUserSignIn:
+class TestUserRegistration:
     
-    @allure.feature("Авторизация пользователя")
-    @allure.story("Успешный вход существующего пользователя")
-    @allure.severity(allure.severity_level.CRITICAL)
-    def test_signin_existing_user_success(self, registered_user):
-        with allure.step("Подготовка тестового пользователя"):
-            assert registered_user is not None
+    @allure.title("Успешная регистрация пользователя")
+    def test_successful_registration(self, user_data):
         
-        with allure.step("Получение учетных данных"):
-            user_email = registered_user["email"]
-            user_password = registered_user["password"]
+        response = requests.post(REGISTER, json=user_data)
+        data = response.json()
         
-        with allure.step("Выполнение запроса на вход"):
-            response = login_user(user_email, user_password)
-        
-        with allure.step("Проверка успешного ответа"):
-            assert response.status_code == 200
-        
-        with allure.step("Анализ структуры ответа"):
-            response_data = response.json()
-            assert response_data["success"] is True
-        
-        with allure.step("Проверка наличия токенов"):
-            assert "accessToken" in response_data
-            assert "refreshToken" in response_data
-        
-        with allure.step("Валидация access token"):
-            access_token = response_data["accessToken"]
-            assert access_token.startswith("Bearer ")
-        
-        with allure.step("Проверка refresh token"):
-            refresh_token = response_data["refreshToken"]
-            assert refresh_token
-        
-        with allure.step("Верификация данных пользователя"):
-            assert "user" in response_data
-            user_info = response_data["user"]
-            assert user_info["email"] == user_email
-            assert user_info["name"] == registered_user["name"]
-        
-        with allure.step("Логирование результатов"):
-            allure.attach(f"Пользователь: {user_email}", name="Учетные данные")
-            allure.attach(f"Access Token начинается с: {access_token[:20]}...", name="Токен авторизации")
+        assert all([
+            response.status_code == 200,
+            data.get("success") is True,
+            "accessToken" in data,
+            data["accessToken"].startswith("Bearer "),
+            "refreshToken" in data,
+            "user" in data,
+            data["user"].get("email") == user_data["email"],
+            data["user"].get("name") == user_data["name"]
+        ]), f"Проверка регистрации не пройдена. Ответ: {data}"
 
-    @allure.feature("Авторизация пользователя")
-    @allure.story("Попытка входа с неверными учетными данными")
-    @allure.severity(allure.severity_level.NORMAL)
-    def test_signin_with_invalid_password_fails(self, registered_user):
-        with allure.step("Подготовка тестового пользователя"):
-            assert registered_user is not None
+    @allure.title("Регистрация с существующим email")
+    def test_registration_with_existing_email(self):
+        """Тест регистрации с email, который уже существует"""
+        user_data = generate_user_data(8)
+        first_response = requests.post(REGISTER, json=user_data)
+        first_data = first_response.json()
+        assert first_response.status_code == 200, "Первый пользователь не создался"
+        second_response = requests.post(REGISTER, json=user_data)
+        second_data = second_response.json()
+        assert all([
+            second_response.status_code == 403,
+            second_data.get("success") is False,
+            second_data.get("message") == "User already exists"
+        ]), f"Ожидалась ошибка дублирования. Ответ: {second_data}"
+    
+    @allure.title("Регистрация без обязательных полей")
+    @pytest.mark.parametrize("missing_field", ["email", "password", "name"])
+    def test_registration_without_required_fields(self, missing_field):
+
+        user_data = generate_user_data(8)
+
+        del user_data[missing_field]
+
+        response = requests.post(REGISTER, json=user_data)
+        data = response.json()
         
-        with allure.step("Использование неверного пароля"):
-            user_email = registered_user["email"]
-            invalid_password = registered_user["password"] + "_wrong"
-        
-        with allure.step("Попытка входа с неверными данными"):
-            response = login_user(user_email, invalid_password)
-        
-        with allure.step("Проверка ошибки авторизации"):
-            assert response.status_code == 401
-        
-        with allure.step("Анализ ответа сервера"):
-            response_data = response.json()
-            assert response_data["success"] is False
-        
-        with allure.step("Проверка сообщения об ошибке"):
-            expected_message = "email or password are incorrect"
-            assert response_data["message"] == expected_message
-        
-        with allure.step("Запись информации об ошибке"):
-            allure.attach(f"Email: {user_email}", name="Использованный email")
-            allure.attach(f"Сообщение об ошибке: {response_data['message']}", name="Детали ошибки")
+        # Проверяем ответ
+        assert all([
+            response.status_code == 403,
+            data.get("success") is False,
+            data.get("message") == "Email, password and name are required fields"
+        ]), f"Некорректный ответ при отсутствии {missing_field}: {data}"
